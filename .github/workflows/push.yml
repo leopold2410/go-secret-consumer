@@ -18,8 +18,8 @@ jobs:
         id: version_step
         run: |
           echo "##[set-output name=version;]${GITHUB_REF#$"refs/tags/v"}"
-          echo "##[set-output name=version_tag;]leopoldk/go-secret-consumer:${GITHUB_REF#$"refs/tags/v"}"
-          echo "##[set-output name=latest_tag;]leopoldk/go-secret-consumer:latest"
+          echo "##[set-output name=version_tag;]${{ secrets.DOCKERHUB_USERNAME }}/go-secret-consumer:${GITHUB_REF#$"refs/tags/v"}"
+          echo "##[set-output name=latest_tag;]${{ secrets.DOCKERHUB_USERNAME }}/go-secret-consumer:latest"
       - name: Print Version
         run: |
           echo ${{steps.version_step.outputs.version}}
