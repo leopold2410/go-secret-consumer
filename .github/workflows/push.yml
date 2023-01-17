@@ -17,9 +17,9 @@ jobs:
       - name: Extract Version
         id: version_step
         run: |
-          echo "##[set-output name=version;]VERSION=${GITHUB_REF#$"refs/tags/v"}"
-          echo "##[set-output name=version_tag;]$GITHUB_REPOSITORY:${GITHUB_REF#$"refs/tags/v"}"
-          echo "##[set-output name=latest_tag;]$GITHUB_REPOSITORY:latest"
+          echo "##[set-output name=version;]${GITHUB_REF#$"refs/tags/v"}"
+          echo "##[set-output name=version_tag;]leopoldk/go-secret-consumer:${GITHUB_REF#$"refs/tags/v"}"
+          echo "##[set-output name=latest_tag;]leopoldk/go-secret-consumer:latest"
       - name: Print Version
         run: |
           echo ${{steps.version_step.outputs.version}}
@@ -49,8 +49,8 @@ jobs:
         with:
           push: true
           tags: |
-            leopoldk/go-secret-consumer:${{env.VERSION}}
-            leopoldk/go-secret-consumer:${{env.LASTEST_TAG}}
+            ${{env.VERSION_TAG}}
+            ${{env.LATEST_TAG}}
           build-args: |
             ${{steps.version_step.outputs.version}}
 
