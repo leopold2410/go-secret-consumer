@@ -2,9 +2,7 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
-	"net/http"
 
 	"devarc.vault.apps.go-secret-consumer/internal"
 )
@@ -18,8 +16,5 @@ func main() {
 
 	consumer := internal.VaultSecretConsumer{}
 	consumer.InitHandlers()
-
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), nil); err != nil {
-		log.Fatal(err)
-	}
+	consumer.StartServer(*port)
 }

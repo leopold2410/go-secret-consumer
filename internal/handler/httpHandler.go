@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -19,6 +20,12 @@ type HttpHandler struct {
 func (handler *HttpHandler) Init() {
 	handler.server = http.NewServeMux()
 	handler.methodHandlerByPath = make(map[string]*HttpMethodHandler)
+}
+
+func (handler *HttpHandler) StartServer(port int) {
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), handler.server); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func (handler *HttpHandler) RegisterHandler(path string, httpMethodHandler HttpMethodHandler) {

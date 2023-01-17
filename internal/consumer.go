@@ -1,6 +1,8 @@
 package internal
 
-import "devarc.vault.apps.go-secret-consumer/internal/handler"
+import (
+	"devarc.vault.apps.go-secret-consumer/internal/handler"
+)
 
 type VaultSecretConsumer struct {
 	httpHandler *handler.HttpHandler
@@ -22,4 +24,8 @@ func (srv *VaultSecretConsumer) InitHandlers() {
 	httpHandler.RegisterHandler("/echo", &echo)
 
 	srv.httpHandler = &httpHandler
+}
+
+func (srv *VaultSecretConsumer) StartServer(port int) {
+	srv.httpHandler.StartServer(port)
 }
