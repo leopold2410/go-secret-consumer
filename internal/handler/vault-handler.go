@@ -3,25 +3,23 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	vault "github.com/hashicorp/vault/api"
-	vault_approle "github.com/hashicorp/vault/api/auth/approle"
 )
 
-type AuthContext struct {
-	AppRole string
-}
-
 type VaultSecretHandler struct {
-	authContext *AuthContext
 	client      *vault.Client
-	authHandler *vault_approle.AppRoleAuth
+	authHandler *VaultAuthHandler
 	ctx         context.Context
 }
 
 type RequestPayload struct {
+	AppRole      string `json:"appRole" description:"appRole for login"`
+	AppSecret    string `json:"appSecret" description:"appSecret for login"`
 	Namespace    string `json:"namespace" description:"vault namespace (enterprise feature)"`
 	SecretEngine string `json:"secretEngine" description:"path to secret engine in vault"`
 	SecretPath   string `json:"secretPath" description:"path to secret"`
@@ -38,62 +36,29 @@ type SecretInfo struct {
 }
 
 type TokenInfo struct {
-	TokenId       string `json:"tokenId"`
-	RequestId     string `json:"requestId"`
-	LeaseId       string `json:"leaseId"`
-	LeaseDuration int    `json:"leaseDuration"`
-	Ttl           int    `json:"ttl"`
-	AppRole       string `json:"appRole"`
+	AppRole string `json:"appRole"`
 }
 
 type Message struct {
-	Token  TokenInfo  `json:"token"`
 	Secret SecretInfo `json:"secret"`
+	Token  TokenInfo  `json:"token"`
 }
 
-func createTokenInfo(authInfo *vault.Secret, appRole string) (*TokenInfo, error) {
-	tokenId, err := authInfo.TokenID()
-	if err != nil {
-		return nil, err
-	}
-
-	return &TokenInfo{
-		TokenId:       tokenId,
-		RequestId:     authInfo.RequestID,
-		LeaseId:       authInfo.LeaseID,
-		LeaseDuration: authInfo.LeaseDuration,
-		Ttl:           authInfo.WrapInfo.TTL,
-		AppRole:       appRole,
-	}, nil
-}
-
-func createAuthHandler(approle string, secret string) (*vault_approle.AppRoleAuth, error) {
-	secret_id := vault_approle.SecretID{
-		FromString: secret,
-	}
-
-	return vault_approle.NewAppRoleAuth(approle, &secret_id)
-}
-
-func createVaultClient() (*vault.Client, error) {
+func CreateVaultClient(vaultAddress string) (*vault.Client, error) {
 	config := vault.DefaultConfig()
-	config.ReadEnvironment()
+	config.Address = vaultAddress
 	return vault.NewClient(config)
 }
 
 func (srv *VaultSecretHandler) Initialize() error {
-	appRole := os.Getenv("VAULT_APP_ROLE")
-	appRoleSecret := os.Getenv("VAULT_APP_ROLE_SECRET")
-	authHandler, err := createAuthHandler(appRole, appRoleSecret)
+	srv.ctx = context.Background()
+	authHandler := VaultAuthHandler{}
+	vaultClient, err := CreateVaultClient(os.Getenv("VAULT_ADDR"))
 	if err != nil {
 		return err
 	}
-	vaultClient, err := createVaultClient()
-	if err != nil {
-		return err
-	}
-	srv.authContext = &AuthContext{AppRole: appRole}
-	srv.authHandler = authHandler
+	authHandler.Initialize(srv.ctx, vaultClient)
+	srv.authHandler = &authHandler
 	srv.client = vaultClient
 	return nil
 }
@@ -125,15 +90,19 @@ func (srv *VaultSecretHandler) Post(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authSecret, err := srv.authHandler.Login(srv.ctx, srv.client)
-	if err != nil {
-		http.Error(w, err.Error(), 401)
+	if payload.AppRole == "" {
+		http.Error(w, fmt.Sprintf("invalid Parameter AppRole: %s", payload.AppRole), http.StatusBadRequest)
 		return
 	}
 
-	tokenInfo, err := createTokenInfo(authSecret, srv.authContext.AppRole)
+	if payload.AppSecret == "" {
+		http.Error(w, fmt.Sprintf("invalid Parameter AppSecret: %s", payload.AppSecret), http.StatusBadRequest)
+		return
+	}
+
+	err = srv.authHandler.Login(payload.AppRole, payload.AppSecret)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), 401)
 		return
 	}
 
@@ -142,21 +111,46 @@ func (srv *VaultSecretHandler) Post(w http.ResponseWriter, req *http.Request) {
 		srv.client.SetNamespace(namespace)
 	}
 	secretEnginePath := payload.SecretEngine
+
+	secretEngine := srv.client.KVv2(secretEnginePath)
+	if secretEngine == nil {
+		http.Error(w, fmt.Sprintf("SecretEngine: %s not found", payload.SecretEngine), http.StatusBadRequest)
+		return
+	}
+
 	secretPath := payload.SecretPath
-	kvSecret, err := srv.client.KVv2(secretEnginePath).Get(srv.ctx, secretPath)
+	kvSecret, err := secretEngine.Get(srv.ctx, secretPath)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	metadata := kvSecret.VersionMetadata
+	if metadata == nil {
+		http.Error(w, "no metadata found", http.StatusBadRequest)
+		return
+	}
 
 	secretInfo := SecretInfo{
-		Version:      kvSecret.VersionMetadata.Version,
+		Version:      metadata.Version,
 		SecretPath:   secretPath,
 		EnginePath:   secretEnginePath,
-		CreationTime: kvSecret.VersionMetadata.CreatedTime.String(),
-		DeletionTime: kvSecret.VersionMetadata.DeletionTime.String(),
+		CreationTime: GetTimeAsString(metadata.CreatedTime),
+		DeletionTime: GetTimeAsString(metadata.DeletionTime),
 		LeaseId:      kvSecret.Raw.LeaseID,
 		RequestId:    kvSecret.Raw.RequestID,
 	}
 
-	message := Message{Token: *tokenInfo, Secret: secretInfo}
+	tokenInfo := TokenInfo{AppRole: payload.AppRole}
+	message := Message{Token: tokenInfo, Secret: secretInfo}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(message)
+}
+
+func GetTimeAsString(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.String()
 }
